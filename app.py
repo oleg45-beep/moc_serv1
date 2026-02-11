@@ -369,23 +369,116 @@ def init_db():
         
         # ===== СОЗДАНИЕ ТАБЛИЦ =====
         c.execute('''CREATE TABLE IF NOT EXISTS users 
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                      username TEXT UNIQUE, 
-                      password TEXT,
-                      handle TEXT,
-                      bio TEXT,
-                      is_support INTEGER DEFAULT 0,
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    username TEXT UNIQUE, 
+                    password TEXT,
+                    handle TEXT,
+                    bio TEXT,
+                    is_support INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         
         c.execute('''CREATE TABLE IF NOT EXISTS user_keys 
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      user_id INTEGER UNIQUE,
-                      master_key_encrypted TEXT,
-                      public_key TEXT,
-                      private_key_encrypted TEXT,
-                      key_setup_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER UNIQUE,
+                    master_key_encrypted TEXT,
+                    public_key TEXT,
+                    private_key_encrypted TEXT,
+                    key_setup_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         
-        # ... и так далее ВСЕ ваши CREATE TABLE ...
+        c.execute('''CREATE TABLE IF NOT EXISTS files 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    user_id INTEGER,
+                    filename TEXT, 
+                    original_name TEXT, 
+                    mime_type TEXT,
+                    file_key_encrypted TEXT,
+                    encryption_algorithm TEXT,
+                    file_size INTEGER DEFAULT 0,
+                    file_hash TEXT,
+                    album_id INTEGER DEFAULT 0,
+                    share_token TEXT UNIQUE,
+                    share_expires TIMESTAMP,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS file_copies 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_id INTEGER,
+                    copy_type TEXT,
+                    filename TEXT,
+                    file_key_encrypted TEXT,
+                    preview_key_encrypted TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS albums 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    user_id INTEGER,
+                    name TEXT,
+                    is_ai_generated INTEGER DEFAULT 0,
+                    ai_parameters TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS friend_requests 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    from_user_id INTEGER,
+                    to_user_id INTEGER,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS friends 
+                    (user_id INTEGER, 
+                    friend_id INTEGER,
+                    is_trusted_for_recovery INTEGER DEFAULT 0,
+                    trust_level INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, friend_id))''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS chats 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    user1_id INTEGER, 
+                    user2_id INTEGER,
+                    last_message TEXT, 
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS messages 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    chat_id INTEGER, 
+                    sender_id INTEGER, 
+                    text TEXT,
+                    file_id INTEGER DEFAULT NULL,
+                    is_notification INTEGER DEFAULT 0,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS social_recovery 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER UNIQUE,
+                    master_key_shares TEXT,
+                    threshold INTEGER DEFAULT 3,
+                    total_shares INTEGER DEFAULT 5,
+                    is_active INTEGER DEFAULT 1,
+                    setup_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS key_shares 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    friend_id INTEGER,
+                    share_index INTEGER,
+                    share_data_encrypted TEXT,
+                    threshold INTEGER,
+                    total_shares INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, friend_id, share_index))''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS recovery_requests 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    request_token TEXT UNIQUE,
+                    status TEXT DEFAULT 'pending',
+                    required_shares INTEGER,
+                    received_shares INTEGER DEFAULT 0,
+                    shares_data TEXT,
+                    recovered_key TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP)''')
         
         # ===== СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ ПОДДЕРЖКИ =====
         try:
