@@ -10,6 +10,9 @@ let selectedFileForChat = null;
 let currentViewFileId = null;
 let pendingDeleteMessageId = null;
 let pendingDeleteChatId = null;
+let isUserScrolling = false;
+let scrollTimeout = null;
+let shouldAutoScroll = true;
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 function formatMoscowTime(timestamp) {
@@ -699,7 +702,7 @@ async function loadChats() {
 }
 
 let lastScrollPosition = 0;
-let shouldAutoScroll = true;
+
 
 function initChatScroll() {
     const container = document.getElementById('chat-messages-container');
@@ -805,6 +808,10 @@ async function loadMessages() {
             oldScrollHeight = container.scrollHeight;
             const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
             wasAtBottom = distanceFromBottom < 100;
+            // Временно отключаем автоскролл если пользователь крутил
+            if (!wasAtBottom && !shouldAutoScroll) {
+                // сохраняем позицию
+            }
         }
         
         wrapper.innerHTML = '';
@@ -821,7 +828,6 @@ async function loadMessages() {
                 const messageDiv = document.createElement('div');
                 messageDiv.className = `message ${isMyMessage ? 'my' : 'other'}`;
                 
-                // Если есть файл в сообщении
                 if (msg.file_id) {
                     let fileUrl = '';
                     let fileName = 'Файл';
@@ -843,9 +849,7 @@ async function loadMessages() {
                                 fileSize = fileData.file_size || 0;
                                 fileType = fileData.mime_type || '';
                             }
-                        } catch(e) {
-                            console.error('Error fetching file info:', e);
-                        }
+                        } catch(e) {}
                     }
                     
                     const isImage = fileType.startsWith('image/') || fileUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i);
@@ -885,7 +889,6 @@ async function loadMessages() {
                     `;
                 }
                 
-                // Кнопка удаления (только для своих сообщений)
                 if (isMyMessage) {
                     const deleteBtn = document.createElement('button');
                     deleteBtn.className = 'delete-message-btn';
@@ -903,8 +906,8 @@ async function loadMessages() {
         
         if (container) {
             setTimeout(() => {
-                if (wasAtBottom) {
-                    container.scrollTop = container.scrollHeight;
+                if (wasAtBottom && shouldAutoScroll) {
+                    smoothScrollToBottom();
                 } else if (!shouldAutoScroll && lastScrollPosition > 0) {
                     const newScrollHeight = container.scrollHeight;
                     const delta = newScrollHeight - oldScrollHeight;
@@ -932,9 +935,6 @@ async function sendMsg() {
     const tempId = 'temp_' + Date.now();
     addTempMessage(text, tempId);
     input.value = '';
-    
-    const container = document.getElementById('chat-messages-container');
-    if (container) setTimeout(() => container.scrollTop = container.scrollHeight, 50);
     
     try {
         const res = await fetch('/api/send_message', {
@@ -965,13 +965,18 @@ async function sendMsg() {
 function addTempMessage(text, tempId) {
     const wrapper = document.getElementById('cb-msgs-content');
     if (!wrapper) return;
+    
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message my temp';
     messageDiv.id = tempId;
-    messageDiv.innerHTML = `<div class="message-content">${escapeHtml(text)}</div><div class="message-time">⏳ Отправляется...</div>`;
+    messageDiv.innerHTML = `
+        <div class="message-content">${escapeHtml(text)}</div>
+        <div class="message-time">⏳ Отправляется... <span class="message-status">✓</span></div>
+    `;
     wrapper.appendChild(messageDiv);
-    const container = document.getElementById('chat-messages-container');
-    if (container) container.scrollTop = container.scrollHeight;
+    
+    // Плавный скролл вниз
+    smoothScrollToBottom();
 }
 
 function markTempMessageError(tempId) {
@@ -2314,4 +2319,35 @@ async function recoverAccount() {
     } catch(e) {
         alert('Ошибка');
     }
+}
+function smoothScrollToBottom() {
+    const container = document.getElementById('chat-messages-container');
+    if (!container) return;
+    
+    // Скроллим только если пользователь не крутил вручную
+    if (shouldAutoScroll && !isUserScrolling) {
+        container.scrollTo({
+            top: container.scrollHeight,
+            behavior: 'smooth'
+        });
+    }
+}
+
+function initChatScroll() {
+    const container = document.getElementById('chat-messages-container');
+    if (!container) return;
+    
+    // Отслеживаем когда пользователь крутит
+    container.addEventListener('scroll', () => {
+        isUserScrolling = true;
+        if (scrollTimeout) clearTimeout(scrollTimeout);
+        
+        scrollTimeout = setTimeout(() => {
+            isUserScrolling = false;
+        }, 150);
+        
+        // Определяем нужно ли автоскроллить дальше
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        shouldAutoScroll = distanceFromBottom < 100;
+    });
 }
