@@ -704,15 +704,15 @@ async function loadChats() {
 let lastScrollPosition = 0;
 
 
-function initChatScroll() {
-    const container = document.getElementById('chat-messages-container');
-    if (!container) return;
-    container.addEventListener('scroll', () => {
-        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-        shouldAutoScroll = distanceFromBottom < 100;
-        lastScrollPosition = container.scrollTop;
-    });
-}
+//function initChatScroll() {
+//    const container = document.getElementById('chat-messages-container');
+//    if (!container) return;
+//    container.addEventListener('scroll', () => {
+//        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+//        shouldAutoScroll = distanceFromBottom < 100;
+//        lastScrollPosition = container.scrollTop;
+//    });
+//}
 
 async function openChat(chatId, otherUserName) {
     ACTIVE_CHAT_ID = chatId;
@@ -2141,8 +2141,6 @@ function closeMobileMenu() {
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('sidebar-overlay');
     const menuBtn = document.getElementById('mobile-menu-btn');
-
-    closeMobileMenu();
     
     if (sidebar) sidebar.classList.remove('mobile-open');
     if (overlay) overlay.classList.remove('active');
@@ -2320,11 +2318,11 @@ async function recoverAccount() {
         alert('Ошибка');
     }
 }
+
 function smoothScrollToBottom() {
     const container = document.getElementById('chat-messages-container');
     if (!container) return;
     
-    // Скроллим только если пользователь не крутил вручную
     if (shouldAutoScroll && !isUserScrolling) {
         container.scrollTo({
             top: container.scrollHeight,
@@ -2333,21 +2331,48 @@ function smoothScrollToBottom() {
     }
 }
 
-function initChatScroll() {
+function handleScroll() {
     const container = document.getElementById('chat-messages-container');
     if (!container) return;
     
-    // Отслеживаем когда пользователь крутит
-    container.addEventListener('scroll', () => {
-        isUserScrolling = true;
-        if (scrollTimeout) clearTimeout(scrollTimeout);
-        
-        scrollTimeout = setTimeout(() => {
-            isUserScrolling = false;
-        }, 150);
-        
-        // Определяем нужно ли автоскроллить дальше
-        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-        shouldAutoScroll = distanceFromBottom < 100;
-    });
+    isUserScrolling = true;
+    if (scrollTimeout) clearTimeout(scrollTimeout);
+    
+    scrollTimeout = setTimeout(() => {
+        isUserScrolling = false;
+    }, 150);
+    
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldAutoScroll = distanceFromBottom < 100;
+    lastScrollPosition = container.scrollTop;
 }
+
+function initChatScroll() {
+    const container = document.getElementById('chat-messages-container');
+    if (!container) return;
+    container.removeEventListener('scroll', handleScroll);
+    container.addEventListener('scroll', handleScroll);
+}
+
+function closeMobileMenu() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    if (overlay) overlay.classList.remove('active');
+    if (menuBtn) menuBtn.classList.remove('hide');
+}
+
+document.addEventListener('click', function(event) {
+    const sidebar = document.getElementById('sidebar');
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    const overlay = document.getElementById('sidebar-overlay');
+    
+    if (!sidebar || !sidebar.classList.contains('mobile-open')) return;
+    if (sidebar.contains(event.target)) return;
+    if (menuBtn && menuBtn.contains(event.target)) return;
+    if (overlay && overlay.contains(event.target)) return;
+    
+    closeMobileMenu();
+});
