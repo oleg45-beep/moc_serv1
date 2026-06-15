@@ -3,6 +3,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
+import sys
 
 from flask import Flask, render_template, request, jsonify, send_from_directory, session, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -21,6 +22,22 @@ def get_db():
     conn = sqlite3.connect('moc.db')
     conn.row_factory = sqlite3.Row
     return conn
+
+def ensure_db():
+    try:
+        conn = sqlite3.connect('moc.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        if not cursor.fetchone():
+            print("⚠️ Database not found, creating...")
+            init_db()
+        else:
+            print("✅ Database exists")
+        conn.close()
+    except Exception as e:
+        print(f"DB check error: {e}")
+        init_db()
+
 
 def init_db():
     conn = get_db()
@@ -171,6 +188,7 @@ def mark_messages_read(chat_id, user_id):
 # ==================== АВТОРИЗАЦИЯ ====================
 @app.route('/')
 def index():
+    ensure_db()
     return render_template('index.html')
 
 @app.route('/api/register', methods=['POST'])
@@ -1208,6 +1226,11 @@ def health():
 def recover_account():
     # Простая заглушка
     return jsonify({'error': 'Not implemented yet'}), 501
+
+
+with app.app_context():
+    init_db()
+    print("✅ Database initialized on startup")
 # ==================== ЗАПУСК ====================
 if __name__ == '__main__':
     init_db()
