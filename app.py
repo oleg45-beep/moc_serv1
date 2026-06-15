@@ -1,9 +1,10 @@
 import os
 import sqlite3
 import uuid
+import time
+import threading
 from datetime import datetime, timedelta
 from functools import wraps
-import sys
 
 from flask import Flask, render_template, request, jsonify, send_from_directory, session, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -18,26 +19,14 @@ UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+# Настройка SQLite
+sqlite3_lock = threading.Lock()
+
 def get_db():
-    conn = sqlite3.connect('moc.db')
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def ensure_db():
-    try:
-        conn = sqlite3.connect('moc.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-        if not cursor.fetchone():
-            print("⚠️ Database not found, creating...")
-            init_db()
-        else:
-            print("✅ Database exists")
-        conn.close()
-    except Exception as e:
-        print(f"DB check error: {e}")
-        init_db()
-
+    with sqlite3_lock:
+        conn = sqlite3.connect('moc.db', timeout=10, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 def init_db():
     conn = get_db()
@@ -125,17 +114,40 @@ def init_db():
         )
     ''')
     
-    # Create test user
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE,
+            master_key_encrypted TEXT,
+            private_key_encrypted TEXT,
+            key_setup_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS social_recovery (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE,
+            master_key_shares TEXT,
+            threshold INTEGER DEFAULT 3,
+            total_shares INTEGER DEFAULT 5,
+            is_active INTEGER DEFAULT 1,
+            setup_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Создаём тестового пользователя
     cursor.execute("SELECT id FROM users WHERE username = 'test'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO users (username, password, handle, bio) VALUES (?, ?, ?, ?)",
                       ('test', generate_password_hash('123'), 'test_user', 'Тестовый пользователь'))
     
-    # Create support user
+    # Создаём пользователя support (4 значения, is_support добавим отдельно)
     cursor.execute("SELECT id FROM users WHERE username = 'support'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO users (username, password, handle, bio) VALUES (?, ?, ?, ?)",
-                      ('support', generate_password_hash('support123'), 'support', 'Техническая поддержка', 1))
+                      ('support', generate_password_hash('support123'), 'support', 'Техническая поддержка'))
+        cursor.execute("UPDATE users SET is_support = 1 WHERE username = 'support'")
     
     conn.commit()
     conn.close()
@@ -187,6 +199,31 @@ def mark_messages_read(chat_id, user_id):
     conn.commit()
     conn.close()
 
+def ensure_db():
+    try:
+        conn = sqlite3.connect('moc.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        if not cursor.fetchone():
+            print("⚠️ Database not found, creating...")
+            init_db()
+        else:
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'last_seen' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN last_seen TIMESTAMP")
+                conn.commit()
+            if 'is_support' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN is_support INTEGER DEFAULT 0")
+                conn.commit()
+                cursor.execute("UPDATE users SET is_support = 1 WHERE username = 'support'")
+                conn.commit()
+            print("✅ Database ready")
+        conn.close()
+    except Exception as e:
+        print(f"DB check error: {e}")
+        init_db()
+
 # ==================== АВТОРИЗАЦИЯ ====================
 @app.route('/')
 def index():
@@ -195,38 +232,41 @@ def index():
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    data = request.json
-    username = data.get('username', '').strip()
-    password = data.get('password', '').strip()
-    
-    if not username or not password:
-        return jsonify({'error': 'Fill all fields'}), 400
-    
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
-    if cursor.fetchone():
+    try:
+        data = request.json
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not username or not password:
+            return jsonify({'error': 'Fill all fields'}), 400
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({'error': 'User exists'}), 400
+        
+        hashed = generate_password_hash(password)
+        cursor.execute("INSERT INTO users (username, password, handle, bio) VALUES (?, ?, ?, ?)",
+                      (username, hashed, username, 'New user'))
+        user_id = cursor.lastrowid
+        
+        cursor.execute("SELECT id FROM users WHERE username = 'support'")
+        support = cursor.fetchone()
+        if support:
+            cursor.execute("INSERT INTO chats (user1_id, user2_id, last_message, last_message_time) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                          (user_id, support['id'], 'Welcome to MOC!'))
+        
+        conn.commit()
         conn.close()
-        return jsonify({'error': 'User exists'}), 400
-    
-    hashed = generate_password_hash(password)
-    cursor.execute("INSERT INTO users (username, password, handle, bio) VALUES (?, ?, ?, ?)",
-                  (username, hashed, username, 'New user'))
-    user_id = cursor.lastrowid
-    
-    # Create chat with support
-    cursor.execute("SELECT id FROM users WHERE username = 'support'")
-    support = cursor.fetchone()
-    if support:
-        cursor.execute("INSERT INTO chats (user1_id, user2_id, last_message, last_message_time) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
-                      (user_id, support['id'], 'Welcome to MOC!'))
-    
-    conn.commit()
-    conn.close()
-    
-    session['user_id'] = user_id
-    session.permanent = True
-    return jsonify({'message': 'OK', 'username': username, 'user_id': user_id})
+        
+        session['user_id'] = user_id
+        session.permanent = True
+        return jsonify({'message': 'OK', 'username': username, 'user_id': user_id})
+    except Exception as e:
+        print(f"Register error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -244,7 +284,6 @@ def login():
             conn.close()
             return jsonify({'error': 'Invalid credentials'}), 401
         
-        # Обновляем время последнего захода
         cursor.execute("UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = ?", (user['id'],))
         conn.commit()
         conn.close()
@@ -255,7 +294,6 @@ def login():
     except Exception as e:
         print(f"Login error: {e}")
         return jsonify({'error': str(e)}), 500
-    
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
@@ -265,62 +303,69 @@ def logout():
 @app.route('/api/profile')
 @login_required
 def get_profile():
-    user_id = session['user_id']
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT username, handle, bio, avatar FROM users WHERE id = ?", (user_id,))
-    user = cursor.fetchone()
-    
-    cursor.execute("SELECT COUNT(*) FROM files WHERE user_id = ?", (user_id,))
-    photos = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM albums WHERE user_id = ?", (user_id,))
-    albums = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM friends WHERE user_id = ?", (user_id,))
-    friends = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM chats WHERE user1_id = ? OR user2_id = ?", (user_id, user_id))
-    chats = cursor.fetchone()[0]
-    
-    cursor.execute('''
-        SELECT fr.id, fr.from_user_id, u.username
-        FROM friend_requests fr
-        JOIN users u ON fr.from_user_id = u.id
-        WHERE fr.to_user_id = ? AND fr.status = 'pending'
-    ''', (user_id,))
-    friend_requests = [dict(row) for row in cursor.fetchall()]
-    
-    cursor.execute('''
-        SELECT u.id, u.username, u.handle
-        FROM friends f JOIN users u ON f.friend_id = u.id
-        WHERE f.user_id = ?
-    ''', (user_id,))
-    friends_list = [dict(row) for row in cursor.fetchall()]
-    
-    conn.close()
-    
-    return jsonify({
-        'user': dict(user),
-        'stats': {'photos': photos, 'albums': albums, 'friends': friends, 'chats': chats},
-        'friend_requests': friend_requests,
-        'friends_list': friends_list
-    })
+    try:
+        user_id = session['user_id']
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT username, handle, bio, avatar, is_support FROM users WHERE id = ?", (user_id,))
+        user = cursor.fetchone()
+        
+        cursor.execute("SELECT COUNT(*) FROM files WHERE user_id = ?", (user_id,))
+        photos = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM albums WHERE user_id = ?", (user_id,))
+        albums = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM friends WHERE user_id = ?", (user_id,))
+        friends = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM chats WHERE user1_id = ? OR user2_id = ?", (user_id, user_id))
+        chats = cursor.fetchone()[0]
+        
+        cursor.execute('''
+            SELECT fr.id, fr.from_user_id, u.username
+            FROM friend_requests fr
+            JOIN users u ON fr.from_user_id = u.id
+            WHERE fr.to_user_id = ? AND fr.status = 'pending'
+        ''', (user_id,))
+        friend_requests = [dict(row) for row in cursor.fetchall()]
+        
+        cursor.execute('''
+            SELECT u.id, u.username, u.handle
+            FROM friends f JOIN users u ON f.friend_id = u.id
+            WHERE f.user_id = ?
+        ''', (user_id,))
+        friends_list = [dict(row) for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'user': dict(user),
+            'stats': {'photos': photos, 'albums': albums, 'friends': friends, 'chats': chats},
+            'friend_requests': friend_requests,
+            'friends_list': friends_list
+        })
+    except Exception as e:
+        print(f"Profile error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/update_profile', methods=['POST'])
 @login_required
 def update_profile():
-    data = request.json
-    username = data.get('username', '').strip()
-    handle = data.get('handle', '').strip()
-    bio = data.get('bio', '').strip()
-    user_id = session['user_id']
-    
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET username = ?, handle = ?, bio = ? WHERE id = ?",
-                  (username, handle, bio, user_id))
-    conn.commit()
-    conn.close()
-    return jsonify({'message': 'OK'})
+    try:
+        data = request.json
+        username = data.get('username', '').strip()
+        handle = data.get('handle', '').strip()
+        bio = data.get('bio', '').strip()
+        user_id = session['user_id']
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET username = ?, handle = ?, bio = ? WHERE id = ?",
+                      (username, handle, bio, user_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'OK'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ==================== АВАТАРЫ ====================
 @app.route('/api/upload_avatar', methods=['POST'])
@@ -385,6 +430,7 @@ def get_chats():
         
         cursor.execute('''
             SELECT c.id, c.last_message, c.last_message_time,
+                   CASE WHEN c.user1_id = ? THEN u2.id ELSE u1.id END as other_user_id,
                    CASE WHEN c.user1_id = ? THEN u2.username ELSE u1.username END as other_user,
                    c.updated_at
             FROM chats c
@@ -392,7 +438,7 @@ def get_chats():
             LEFT JOIN users u2 ON c.user2_id = u2.id
             WHERE c.user1_id = ? OR c.user2_id = ?
             ORDER BY c.last_message_time DESC
-        ''', (user_id, user_id, user_id))
+        ''', (user_id, user_id, user_id, user_id))
         
         chats = []
         unread_counts = get_unread_counts(user_id)
@@ -427,7 +473,8 @@ def get_messages(chat_id):
             return jsonify({'error': 'Access denied'}), 403
         
         cursor.execute('''
-            SELECT m.*, u.username as sender_name, f.mime_type, f.filename as file_filename, f.original_name as file_original_name, f.file_size as file_size
+            SELECT m.*, u.username as sender_name, f.mime_type, f.filename as file_filename, 
+                   f.original_name as file_original_name, f.file_size as file_size
             FROM messages m
             LEFT JOIN users u ON m.sender_id = u.id
             LEFT JOIN files f ON m.file_id = f.id
@@ -504,13 +551,16 @@ def send_message():
 @app.route('/api/mark_read', methods=['POST'])
 @login_required
 def mark_read():
-    data = request.json
-    chat_id = data.get('chat_id')
-    if not chat_id:
-        return jsonify({'error': 'No chat_id'}), 400
-    
-    mark_messages_read(chat_id, session['user_id'])
-    return jsonify({'message': 'OK'})
+    try:
+        data = request.json
+        chat_id = data.get('chat_id')
+        if not chat_id:
+            return jsonify({'error': 'No chat_id'}), 400
+        
+        mark_messages_read(chat_id, session['user_id'])
+        return jsonify({'message': 'OK'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/unread_counts')
 @login_required
@@ -704,14 +754,12 @@ def share_file():
         conn = get_db()
         cursor = conn.cursor()
         
-        # Проверяем файл
         cursor.execute("SELECT id, original_name FROM files WHERE id = ? AND user_id = ?", (file_id, user_id))
         file = cursor.fetchone()
         if not file:
             conn.close()
             return jsonify({'error': 'File not found'}), 404
         
-        # Если создаём ссылку
         if expires_hours and not chat_id:
             share_token = str(uuid.uuid4())
             cursor.execute('''
@@ -723,7 +771,6 @@ def share_file():
             share_url = f"{request.host_url}share/{share_token}"
             return jsonify({'share_url': share_url, 'message': 'Link created'})
         
-        # Если отправляем в чат
         if chat_id:
             cursor.execute("SELECT id, user1_id, user2_id FROM chats WHERE id = ?", (chat_id,))
             chat = cursor.fetchone()
@@ -895,47 +942,28 @@ def send_friend_request():
         data = request.json
         username = data.get('username', '').strip()
         
-        if not username:
-            return jsonify({'error': 'Введите имя пользователя'}), 400
-        
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
         target = cursor.fetchone()
-        
         if not target:
             conn.close()
-            return jsonify({'error': f'Пользователь "{username}" не найден'}), 404
+            return jsonify({'error': 'User not found'}), 404
         
         user_id = session['user_id']
         target_id = target['id']
         
-        if user_id == target_id:
-            conn.close()
-            return jsonify({'error': 'Нельзя добавить самого себя'}), 400
-        
-        # Проверяем друзья
-        cursor.execute("SELECT 1 FROM friends WHERE user_id = ? AND friend_id = ?", (user_id, target_id))
-        if cursor.fetchone():
-            conn.close()
-            return jsonify({'error': 'Уже в друзьях'}), 400
-        
-        # Проверяем существующий запрос
         cursor.execute("SELECT id FROM friend_requests WHERE from_user_id = ? AND to_user_id = ? AND status = 'pending'", (user_id, target_id))
         if cursor.fetchone():
             conn.close()
-            return jsonify({'error': 'Запрос уже отправлен'}), 400
+            return jsonify({'error': 'Request already sent'}), 400
         
         cursor.execute("INSERT INTO friend_requests (from_user_id, to_user_id) VALUES (?, ?)", (user_id, target_id))
         conn.commit()
         conn.close()
-        
         return jsonify({'message': 'OK'})
     except Exception as e:
-        print(f"Send friend request error: {e}")
         return jsonify({'error': str(e)}), 500
-
-
 
 @app.route('/api/respond_friend_request', methods=['POST'])
 @login_required
@@ -984,6 +1012,32 @@ def remove_friend():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/suggested_friends')
+@login_required
+def suggested_friends():
+    try:
+        user_id = session['user_id']
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT DISTINCT u.id, u.username, u.handle
+            FROM chats c
+            JOIN users u ON (c.user1_id = u.id OR c.user2_id = u.id)
+            WHERE (c.user1_id = ? OR c.user2_id = ?)
+            AND u.id != ?
+            AND u.id NOT IN (SELECT friend_id FROM friends WHERE user_id = ?)
+            AND u.id NOT IN (SELECT from_user_id FROM friend_requests WHERE to_user_id = ? AND status = 'pending')
+            AND u.id NOT IN (SELECT to_user_id FROM friend_requests WHERE from_user_id = ? AND status = 'pending')
+            LIMIT 10
+        ''', (user_id, user_id, user_id, user_id, user_id, user_id))
+        
+        suggested = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return jsonify(suggested)
+    except Exception as e:
+        return jsonify([])
+
 # ==================== БЕЗОПАСНОСТЬ ====================
 @app.route('/api/security/overview')
 @login_required
@@ -1019,14 +1073,67 @@ def security_overview():
             'friends': {'total': 0, 'list': []}
         })
 
+@app.route('/api/init_encryption', methods=['POST'])
+@login_required
+def init_encryption():
+    try:
+        user_id = session['user_id']
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        import secrets
+        import base64
+        master_key = base64.b64encode(secrets.token_bytes(32)).decode()
+        
+        cursor.execute("INSERT OR REPLACE INTO user_keys (user_id, master_key_encrypted) VALUES (?, ?)",
+                      (user_id, master_key))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'OK', 'key_created': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
+@app.route('/api/social_recovery/setup', methods=['POST'])
+@login_required
+def social_recovery_setup():
+    try:
+        data = request.json
+        trusted_friends = data.get('trusted_friends', [])
+        threshold = data.get('threshold', 3)
+        
+        if len(trusted_friends) != 5:
+            return jsonify({'error': 'Need exactly 5 friends'}), 400
+        
+        user_id = session['user_id']
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        for friend_id in trusted_friends:
+            cursor.execute("UPDATE friends SET is_trusted_for_recovery = 1 WHERE user_id = ? AND friend_id = ?",
+                          (user_id, friend_id))
+        
+        import json
+        shares_data = json.dumps({'trusted': trusted_friends, 'threshold': threshold})
+        
+        cursor.execute("INSERT OR REPLACE INTO social_recovery (user_id, master_key_shares, threshold, total_shares, is_active) VALUES (?, ?, ?, 5, 1)",
+                      (user_id, shares_data, threshold))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'OK', 'trusted_friends': trusted_friends})
+    except Exception as e:
+        print(f"Social recovery error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ==================== АДМИН ====================
 @app.route('/api/admin_stats')
 @login_required
 def admin_stats():
     try:
         user_id = session['user_id']
-        conn = sqlite3.connect('moc.db')
-        conn.row_factory = sqlite3.Row
+        conn = get_db()
         cursor = conn.cursor()
         
         cursor.execute("SELECT is_support FROM users WHERE id = ?", (user_id,))
@@ -1047,7 +1154,7 @@ def admin_stats():
         users = []
         for row in cursor.fetchall():
             user_data = dict(row)
-            user_data['password_hash'] = user_data['password'][:20] + '...' if user_data.get('password') else 'нет'
+            user_data['password_hash'] = '***'
             users.append(user_data)
         
         conn.close()
@@ -1067,121 +1174,11 @@ def delete_user(target_id):
         cursor.execute("SELECT is_support FROM users WHERE id = ?", (user_id,))
         user = cursor.fetchone()
         if not user or not user['is_support']:
+            conn.close()
             return jsonify({'error': 'Access denied'}), 403
         
         cursor.execute("DELETE FROM users WHERE id = ?", (target_id,))
         conn.commit()
-        conn.close()
-        return jsonify({'message': 'OK'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/suggested_friends')
-@login_required
-def suggested_friends():
-    try:
-        user_id = session['user_id']
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        # Находим пользователей, с которыми есть чат, но нет в друзьях
-        cursor.execute('''
-            SELECT DISTINCT u.id, u.username, u.handle
-            FROM chats c
-            JOIN users u ON (c.user1_id = u.id OR c.user2_id = u.id)
-            WHERE (c.user1_id = ? OR c.user2_id = ?)
-            AND u.id != ?
-            AND u.id NOT IN (SELECT friend_id FROM friends WHERE user_id = ?)
-            AND u.id NOT IN (SELECT from_user_id FROM friend_requests WHERE to_user_id = ? AND status = 'pending')
-            AND u.id NOT IN (SELECT to_user_id FROM friend_requests WHERE from_user_id = ? AND status = 'pending')
-            LIMIT 10
-        ''', (user_id, user_id, user_id, user_id, user_id, user_id))
-        
-        suggested = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        return jsonify(suggested)
-    except Exception as e:
-        return jsonify([])
-    
-
-@app.route('/api/init_encryption', methods=['POST'])
-@login_required
-def init_encryption():
-    try:
-        user_id = session['user_id']
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        # Создаём мастер-ключ
-        import secrets
-        import base64
-        master_key = base64.b64encode(secrets.token_bytes(32)).decode()
-        
-        cursor.execute("INSERT OR REPLACE INTO user_keys (user_id, master_key_encrypted) VALUES (?, ?)",
-                      (user_id, master_key))
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'message': 'OK', 'key_created': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/social_recovery/setup', methods=['POST'])
-@login_required
-def setup_social_recovery():
-    return jsonify({'message': 'OK'})
-
-# ==================== AI И ДРУГОЕ ====================
-@app.route('/api/ai_response', methods=['POST'])
-@login_required
-def ai_response():
-    data = request.json
-    message = data.get('message', '').strip().lower()
-    
-    responses = {
-        'привет': 'Привет! Чем могу помочь? 😊',
-        'как дела': 'Отлично! А у тебя?',
-        'шифрование': 'MOC использует сквозное шифрование для всех сообщений! 🔐',
-        'файл': 'Загрузить файл можно в разделе "Медиа"',
-        'альбом': 'Создавай альбомы для группировки фото!',
-        'друг': 'Добавляй друзей через профиль',
-        'чат': 'Все чаты защищены сквозным шифрованием',
-        'помощь': 'Я могу рассказать о шифровании, альбомах, друзьях и чатах!'
-    }
-    
-    for key, resp in responses.items():
-        if key in message:
-            return jsonify({'response': resp})
-    
-    return jsonify({'response': 'Я здесь, чтобы помочь с MOC! Спроси что-нибудь о шифровании, чатах или альбомах.'})
-
-@app.route('/api/report', methods=['POST'])
-@login_required
-def report():
-    return jsonify({'message': 'OK'})
-
-@app.route('/api/upload_encrypted', methods=['POST'])
-@login_required
-def upload_encrypted():
-    return jsonify({'message': 'Coming soon'})
-
-@app.route('/api/delete_message', methods=['POST'])
-@login_required
-def delete_message():
-    try:
-        data = request.json
-        message_id = data.get('message_id')
-        chat_id = data.get('chat_id')
-        user_id = session['user_id']
-        
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM messages WHERE id = ? AND sender_id = ? AND chat_id = ?", 
-                      (message_id, user_id, chat_id))
-        if cursor.fetchone():
-            cursor.execute("DELETE FROM messages WHERE id = ?", (message_id,))
-            conn.commit()
         conn.close()
         return jsonify({'message': 'OK'})
     except Exception as e:
@@ -1221,18 +1218,68 @@ def copy_to_cloud(file_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/delete_message', methods=['POST'])
+@login_required
+def delete_message():
+    try:
+        data = request.json
+        message_id = data.get('message_id')
+        chat_id = data.get('chat_id')
+        user_id = session['user_id']
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM messages WHERE id = ? AND sender_id = ? AND chat_id = ?", 
+                      (message_id, user_id, chat_id))
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+            conn.commit()
+        conn.close()
+        return jsonify({'message': 'OK'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/recover', methods=['POST'])
+def recover_account():
+    return jsonify({'error': 'Not implemented yet'}), 501
+
+@app.route('/api/ai_response', methods=['POST'])
+@login_required
+def ai_response():
+    data = request.json
+    message = data.get('message', '').strip().lower()
+    
+    responses = {
+        'привет': 'Привет! Чем могу помочь? 😊',
+        'как дела': 'Отлично! А у тебя?',
+        'шифрование': 'MOC использует сквозное шифрование для всех сообщений! 🔐',
+        'файл': 'Загрузить файл можно в разделе "Медиа"',
+        'альбом': 'Создавай альбомы для группировки фото!',
+        'друг': 'Добавляй друзей через профиль',
+        'чат': 'Все чаты защищены сквозным шифрованием',
+        'помощь': 'Я могу рассказать о шифровании, альбомах, друзьях и чатах!'
+    }
+    
+    for key, resp in responses.items():
+        if key in message:
+            return jsonify({'response': resp})
+    
+    return jsonify({'response': 'Я здесь, чтобы помочь с MOC! Спроси что-нибудь о шифровании, чатах или альбомах.'})
+
+@app.route('/api/report', methods=['POST'])
+@login_required
+def report():
+    return jsonify({'message': 'OK'})
+
+@app.route('/api/upload_encrypted', methods=['POST'])
+@login_required
+def upload_encrypted():
+    return jsonify({'message': 'Coming soon'})
+
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok'})
-@app.route('/api/recover', methods=['POST'])
-def recover_account():
-    # Простая заглушка
-    return jsonify({'error': 'Not implemented yet'}), 501
 
-
-with app.app_context():
-    init_db()
-    print("✅ Database initialized on startup")
 # ==================== ЗАПУСК ====================
 if __name__ == '__main__':
     init_db()
