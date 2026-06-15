@@ -51,6 +51,8 @@ def init_db():
             handle TEXT,
             bio TEXT,
             avatar TEXT,
+            is_support INTEGER DEFAULT 0,
+            last_seen TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
