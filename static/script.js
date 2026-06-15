@@ -2147,14 +2147,9 @@ function closeMobileMenu() {
     if (menuBtn) menuBtn.classList.remove('hide');
 }
 
-document.addEventListener('click', closeMobileMenuOnClickOutside);
 
-function closeMobileMenu() {
-    const sidebar = document.getElementById('sidebar');
-    if (sidebar) {
-        sidebar.classList.remove('mobile-open');
-    }
-}
+
+
 
 // Закрытие по клику вне меню
 document.addEventListener('click', function(event) {
@@ -2172,17 +2167,7 @@ document.addEventListener('click', function(event) {
 
 
 
-// Закрытие по клику вне меню
-document.addEventListener('click', function(event) {
-    const sidebar = document.getElementById('sidebar');
-    const menuBtn = document.getElementById('mobile-menu-btn');
-    
-    if (!sidebar || !sidebar.classList.contains('mobile-open')) return;
-    if (sidebar.contains(event.target)) return;
-    if (menuBtn && menuBtn.contains(event.target)) return;
-    
-    closeMobileMenu();
-});
+
 
 
 async function loadChatAvatar(chatId, userId, element) {
@@ -2354,16 +2339,9 @@ function initChatScroll() {
     container.addEventListener('scroll', handleScroll);
 }
 
-function closeMobileMenu() {
-    const sidebar = document.getElementById('sidebar');
-    const overlay = document.getElementById('sidebar-overlay');
-    const menuBtn = document.getElementById('mobile-menu-btn');
-    
-    if (sidebar) sidebar.classList.remove('mobile-open');
-    if (overlay) overlay.classList.remove('active');
-    if (menuBtn) menuBtn.classList.remove('hide');
-}
 
+
+// Закрытие по клику вне меню (ОДИН обработчик)
 document.addEventListener('click', function(event) {
     const sidebar = document.getElementById('sidebar');
     const menuBtn = document.getElementById('mobile-menu-btn');
@@ -2376,3 +2354,157 @@ document.addEventListener('click', function(event) {
     
     closeMobileMenu();
 });
+
+// Загрузка аватара для чата
+async function loadChatAvatar(chatId, userId, element) {
+    if (!element) return;
+    try {
+        const res = await fetch(`/api/get_avatar/${userId}`);
+        if (res.ok) {
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            element.style.backgroundImage = `url(${url})`;
+            element.style.backgroundSize = 'cover';
+            element.style.backgroundPosition = 'center';
+            element.innerText = '';
+        } else {
+            element.style.backgroundImage = '';
+            element.style.backgroundColor = '#7C3AED';
+        }
+    } catch(e) {
+        element.style.backgroundImage = '';
+        element.style.backgroundColor = '#7C3AED';
+    }
+}
+
+// Статистика для support
+async function loadAdminStats() {
+    try {
+        const res = await fetch('/api/admin_stats');
+        if (!res.ok) {
+            if (res.status === 403) {
+                alert('Доступ только для поддержки');
+                return;
+            }
+            throw new Error();
+        }
+        const users = await res.json();
+        
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-card" style="max-width: 90vw; max-height: 80vh; overflow-y: auto;">
+                <div class="modal-header-row">
+                    <h3><i data-lucide="bar-chart"></i> Статистика пользователей</h3>
+                    <i data-lucide="x" class="close-icon" onclick="this.closest('.modal').remove()"></i>
+                </div>
+                <div id="admin-stats-list">
+                    ${users.map(u => `
+                        <div class="admin-user-item" style="padding: 12px; border-bottom: 1px solid var(--border);">
+                            <div><strong>${escapeHtml(u.username)}</strong> (ID: ${u.id})</div>
+                            <div style="font-size: 12px; color: var(--text-tertiary);">📅 Регистрация: ${formatMoscowTime(u.created_at)}</div>
+                            <div style="font-size: 12px; color: var(--text-tertiary);">🕐 Последний вход: ${u.last_seen ? formatMoscowTime(u.last_seen) : 'никогда'}</div>
+                            <div style="font-size: 12px;">📁 Файлов: ${u.files_count || 0}</div>
+                            <div style="font-size: 12px; font-family: monospace;">🔑 Хеш пароля: ${u.password_hash || 'нет'}</div>
+                            <button class="btn-xs btn-danger" onclick="deleteUser(${u.id})" style="margin-top: 8px;">Удалить аккаунт</button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch(e) {
+        console.error(e);
+        alert('Ошибка загрузки статистики');
+    }
+}
+
+async function deleteUser(userId) {
+    if (!confirm('Удалить пользователя навсегда?')) return;
+    try {
+        const res = await fetch(`/api/delete_user/${userId}`, { method: 'DELETE' });
+        if (res.ok) {
+            showUploadNotification('✅ Пользователь удален', 'success');
+            document.querySelector('.modal')?.remove();
+        } else {
+            alert('Ошибка удаления');
+        }
+    } catch(e) {
+        alert('Ошибка соединения');
+    }
+}
+
+// Проверка доступа для support
+async function checkAdminAccess() {
+    try {
+        const res = await fetch('/api/profile');
+        const data = await res.json();
+        if (data.user && data.user.username === 'support') {
+            document.getElementById('l-admin').style.display = 'flex';
+        }
+    } catch(e) {}
+}
+checkAdminAccess();
+
+function uploadEncryptedFileFromSecurity() {
+    document.querySelector('.modal')?.remove();
+    nav('media');
+    setTimeout(() => {
+        const encryptBtn = document.querySelector('#v-media .btn-pri:last-child');
+        if (encryptBtn && encryptBtn.innerText.includes('Шифровать')) {
+            encryptBtn.click();
+        } else {
+            uploadEncryptedFile();
+        }
+    }, 300);
+}
+
+function showRecovery() {
+    toggleModal('recovery-modal');
+}
+
+async function recoverAccount() {
+    const code = document.getElementById('recovery-code').value.trim();
+    if (!code) {
+        alert('Введите код');
+        return;
+    }
+    try {
+        const res = await fetch('/api/recover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            alert('Аккаунт восстановлен! Войдите с новым паролем.');
+            toggleModal('recovery-modal');
+        } else {
+            alert('Неверный код');
+        }
+    } catch(e) {
+        alert('Ошибка');
+    }
+}
+
+// Функция для добавления друга по имени (из возможных друзей)
+async function addFriendByName(username) {
+    try {
+        const res = await fetch('/api/send_friend_request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: username })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showUploadNotification(`✅ Запрос отправлен ${username}`, 'success');
+            loadSuggestedFriends();
+            loadProfile();
+        } else {
+            alert(data.error || 'Ошибка');
+        }
+    } catch(e) {
+        alert('Ошибка соединения');
+    }
+}
