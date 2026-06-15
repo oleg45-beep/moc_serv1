@@ -2,493 +2,607 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>MOC - Secure Cloud</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- PWA -->
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#7C3AED">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MOC">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
 </head>
 <body>
 
-    <!-- MODAL: AUTH -->
-    <div id="auth-modal" class="modal">
-        <div class="modal-card">
-            <div class="modal-header">
-                <i data-lucide="cloud" style="color:#a78bfa"></i> MOC
+<!-- ==================== МОДАЛЬНЫЕ ОКНА ==================== -->
+
+<!-- Авторизация -->
+<div id="auth-modal" class="modal">
+    <div class="modal-card">
+        <div class="modal-header">
+            <i data-lucide="cloud"></i> MOC
+        </div>
+        <h2 id="modal-title">Вход</h2>
+        <input type="text" id="auth-user" placeholder="Логин">
+        <input type="password" id="auth-pass" placeholder="Пароль">
+        <button class="btn-primary" onclick="auth()">Войти</button>
+        <p class="link" onclick="toggleAuth()">Нет аккаунта?</p>
+        <p id="auth-err" class="error"></p>
+    </div>
+</div>
+<div id="recovery-modal" class="modal hidden">
+    <div class="modal-card">
+        <div class="modal-header-row">
+            <h3><i data-lucide="key"></i> Восстановление аккаунта</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('recovery-modal')"></i>
+        </div>
+        <p>Введите код восстановления:</p>
+        <input type="text" id="recovery-code" placeholder="Код из письма">
+        <button class="btn-primary" onclick="recoverAccount()">Восстановить</button>
+    </div>
+</div>
+<!-- AI Ассистент -->
+<div id="ai-modal" class="modal hidden">
+    <div class="modal-card chat-modal">
+        <div class="modal-header-row">
+            <h3><i data-lucide="bot"></i> MOC.AI</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('ai-modal')"></i>
+        </div>
+        <div id="ai-messages" class="mini-chat-area">
+            <div class="msg ai">
+                <div class="msg-header">
+                    <i data-lucide="bot"></i>
+                    <strong>MOC.AI:</strong>
+                </div>
+                <div class="msg-text">Привет! Я ИИ-ассистент MOC. Спроси меня о чём угодно!</div>
             </div>
-            <h2 id="modal-title">Вход</h2>
-            <input type="text" id="auth-user" placeholder="Логин">
-            <input type="password" id="auth-pass" placeholder="Пароль">
-            <button class="btn-primary" onclick="auth()">Войти</button>
-            <p class="link" onclick="toggleAuth()">Нет аккаунта?</p>
-            <p id="auth-err" class="error"></p>
+            <div class="ai-suggestions">
+                <button class="ai-suggestion" onclick="insertAiSuggestion('Расскажи про шифрование')">🔐 Шифрование</button>
+                <button class="ai-suggestion" onclick="insertAiSuggestion('Как создать альбом?')">📁 Альбомы</button>
+                <button class="ai-suggestion" onclick="insertAiSuggestion('Как добавить друга?')">👥 Друзья</button>
+                <button class="ai-suggestion" onclick="insertAiSuggestion('Как отправить файл в чат?')">📎 Файлы</button>
+            </div>
+        </div>
+        <div class="mini-input">
+            <input type="text" id="ai-input" placeholder="Спроси о MOC...">
+            <button onclick="sendAi()"><i data-lucide="send"></i></button>
         </div>
     </div>
+</div>
 
-    <!-- MODAL: AI CHAT -->
-    <div id="ai-modal" class="modal hidden">
-        <div class="modal-card chat-modal">
-            <div class="modal-header-row">
-                <h3><i data-lucide="bot"></i> MOC.AI</h3>
-                <i data-lucide="x" class="close-icon" onclick="toggleModal('ai-modal')"></i>
+
+<!-- Модалка для аватарки -->
+<div id="avatar-modal" class="modal hidden">
+    <div class="modal-card" style="max-width: 500px;">
+        <div class="modal-header-row">
+            <h3><i data-lucide="image"></i> Редактировать аватар</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('avatar-modal')"></i>
+        </div>
+        <div style="text-align: center; margin-bottom: 20px;">
+            <div style="position: relative; width: 150px; height: 150px; margin: 0 auto; border-radius: 50%; overflow: hidden; background: #f3f4f6; border: 3px solid var(--primary);">
+                <img id="avatar-preview" src="" style="width: 100%; height: 100%; object-fit: cover; display: none;">
+                <div id="avatar-preview-placeholder" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #7C3AED; color: white; font-size: 48px; font-weight: bold;">?</div>
             </div>
-            <div id="ai-messages" class="mini-chat-area">
-                <div class="msg ai">
-                    <div class="msg-header">
-                        <i data-lucide="bot" width="16" height="16"></i>
-                        <strong>MOC.AI:</strong>
+        </div>
+        <input type="file" id="avatar-input" accept="image/*" style="margin-bottom: 20px;">
+        <button class="btn-primary" onclick="uploadAvatar()">Загрузить аватар</button>
+    </div>
+</div>
+
+<!-- Сообщить об ошибке -->
+<div id="bug-modal" class="modal hidden">
+    <div class="modal-card">
+        <div class="modal-header-row">
+            <h3><i data-lucide="alert-triangle"></i> Сообщить об ошибке</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('bug-modal')"></i>
+        </div>
+        <textarea id="bug-text" rows="4" placeholder="Опишите проблему..."></textarea>
+        <button class="btn-primary" onclick="sendBug()">Отправить</button>
+    </div>
+</div>
+
+<!-- Создать альбом -->
+<div id="album-modal" class="modal hidden">
+    <div class="modal-card">
+        <div class="modal-header-row">
+            <h3><i data-lucide="folder-plus"></i> Новый альбом</h3>
+            <i data-lucide="x" onclick="toggleModal('album-modal')"></i>
+        </div>
+        <input type="text" id="album-name" placeholder="Название альбома">
+        <button class="btn-primary" onclick="createAlbum()">Создать</button>
+    </div>
+</div>
+
+<!-- Редактировать профиль -->
+<div id="edit-profile-modal" class="modal hidden">
+    <div class="modal-card">
+        <div class="modal-header-row">
+            <h3><i data-lucide="user"></i> Редактировать профиль</h3>
+            <i data-lucide="x" onclick="toggleModal('edit-profile-modal')"></i>
+        </div>
+        <input type="text" id="edit-username" placeholder="Имя пользователя (логин)">
+        <input type="text" id="edit-handle" placeholder="Отображаемое имя (@handle)">
+        <textarea id="edit-bio" rows="3" placeholder="О себе"></textarea>
+        <button class="btn-primary" onclick="saveProfile()">Сохранить</button>
+    </div>
+</div>
+
+<!-- Просмотр фото -->
+<div id="image-modal" class="modal hidden">
+    <div class="modal-card image-modal">
+        <div class="modal-header-row">
+            <h3><i data-lucide="image"></i> Просмотр фото</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('image-modal')"></i>
+        </div>
+        <div id="image-container">
+            <img id="modal-image" src="" alt="">
+        </div>
+        <div class="image-actions">
+            <button class="btn-secondary" onclick="downloadImage()"><i data-lucide="download"></i> Скачать</button>
+            <button class="btn-primary" onclick="toggleModal('image-modal')"><i data-lucide="x"></i> Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<!-- Просмотр альбома -->
+<div id="album-view-modal" class="modal hidden"></div>
+
+<!-- Добавить в альбом -->
+<div id="add-to-album-modal" class="modal hidden">
+    <div class="modal-card">
+        <div class="modal-header-row">
+            <h3><i data-lucide="folder-plus"></i> Добавить в альбом</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('add-to-album-modal')"></i>
+        </div>
+        <div id="albums-select">Загрузка...</div>
+        <div id="album-actions" class="hidden">
+            <button class="btn-primary" onclick="addSelectedToAlbum()">Добавить</button>
+        </div>
+    </div>
+</div>
+
+<!-- Выбрать файлы для альбома -->
+<div id="select-files-modal" class="modal hidden">
+    <div class="modal-card">
+        <div class="modal-header-row">
+            <h3><i data-lucide="image"></i> Выберите файлы</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('select-files-modal')"></i>
+        </div>
+        <div id="files-select">Загрузка...</div>
+        <div id="files-actions" class="hidden">
+            <button class="btn-primary" onclick="addSelectedFilesToAlbum()">Добавить выбранные</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: SHARE FILE -->
+<div id="share-file-modal" class="modal hidden">
+    <div class="modal-card">
+        <div class="modal-header-row">
+            <h3><i data-lucide="share-2"></i> Поделиться файлом</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('share-file-modal')"></i>
+        </div>
+        <div id="share-file-info">
+            <p>Загрузка информации о файле...</p>
+        </div>
+        <div class="share-options">
+            <div class="share-option">
+                <h4><i data-lucide="link"></i> Создать ссылку</h4>
+                <p>Создайте публичную ссылку для скачивания файла</p>
+                <select id="share-expires">
+                    <option value="1">1 час</option>
+                    <option value="12">12 часов</option>
+                    <option value="24" selected>1 день</option>
+                    <option value="168">7 дней</option>
+                    <option value="720">30 дней</option>
+                    <option value="8760">365 дней</option>
+                </select>
+                <button class="btn-primary" onclick="createShareLink()">
+                    <i data-lucide="link"></i> Создать ссылку
+                </button>
+            </div>
+            
+            <div class="share-option">
+                <h4><i data-lucide="message-square"></i> Отправить в чат</h4>
+                <p>Отправить файл в один из ваших чатов</p>
+                <select id="share-chat-select">
+                    <option value="">Выберите чат...</option>
+                </select>
+                <button class="btn-primary" onclick="sendFileToChat()">
+                    <i data-lucide="send"></i> Отправить
+                </button>
+            </div>
+        </div>
+        
+        <div id="share-result" class="hidden">
+            <div class="share-success">
+                <i data-lucide="check-circle" style="color: #10B981;"></i>
+                <h4>Ссылка создана!</h4>
+                <div class="share-link-container">
+                    <input type="text" id="share-link" readonly>
+                    <button class="btn-xs" onclick="copyShareLink()">
+                        <i data-lucide="copy"></i>
+                    </button>
+                </div>
+                <p class="share-note">Ссылка будет активна указанное время</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- Модалка создания чата -->
+<div id="create-chat-modal" class="modal hidden">
+    <div class="modal-card" style="max-width: 400px;">
+        <div class="modal-header-row">
+            <h3><i data-lucide="message-plus"></i> Новый чат</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('create-chat-modal')"></i>
+        </div>
+        <input type="text" id="chat-username-input" placeholder="Имя пользователя..." style="margin-bottom: 20px;">
+        <button class="btn-primary" onclick="createChatFromModal()">
+            <i data-lucide="send"></i> Создать чат
+        </button>
+    </div>
+</div>
+
+
+<!-- ==================== ОСНОВНОЕ ПРИЛОЖЕНИЕ ==================== -->
+<div id="app" class="hidden">
+    <!-- Сайдбар (скрывается на мобильных) -->
+    <aside class="sidebar" id="sidebar">
+        <div class="logo">
+            <i data-lucide="cloud"></i> <span>MOC</span>
+        </div>
+        <nav>
+            <a href="#" id="l-home" class="active" onclick="nav('home')"><i data-lucide="home"></i> <span>Главная</span></a>
+            <a href="#" id="l-media" onclick="nav('media')"><i data-lucide="image"></i> <span>Медиа</span></a>
+            <a href="#" id="l-chats" onclick="nav('chats')"><i data-lucide="message-square"></i> <span>Чаты</span></a>
+            <a href="#" id="l-profile" onclick="nav('profile')"><i data-lucide="user"></i> <span>Профиль</span></a>
+            <a href="#" id="l-security" onclick="openSecurityDashboard()"><i data-lucide="shield"></i> <span>Безопасность</span></a>
+            <a href="#" onclick="toggleTheme()" id="theme-switch">
+                <i data-lucide="moon" id="theme-icon"></i> 
+                <span id="theme-text">Тёмная тема</span>
+            </a>
+            <a href="#" id="l-admin" onclick="loadAdminStats()" style="display: none;">
+                <i data-lucide="bar-chart"></i> <span>Статистика</span>
+            </a>
+        </nav>
+        <div class="user-mini">
+            <div class="avatar-xs" id="mini-avatar">?</div>
+            <div class="user-info">
+                <span id="mini-name">User</span>
+                <span onclick="logout()" class="logout-link">Выйти</span>
+                <div style="font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 4px;">v0.5.0</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Кнопка бургер для мобильных -->
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleMobileMenu()">
+        <i data-lucide="menu"></i>
+    </button>
+
+    <main class="content">
+        <!-- Главная -->
+        <section id="v-home">
+            <div class="hero">
+                <h1>MOC <span class="badge">SECURE</span></h1>
+                <p>Безопасное. Умное. <span class="highlight">Твоё. 🔐</span></p>
+            </div>
+            <div class="cards-grid">
+                <div class="card" onclick="openSecurityDashboard()">
+                    <i data-lucide="lock"></i>
+                    <h3>Полное шифрование</h3>
+                    <p>XChaCha20-Poly1305 + E2EE чаты</p>
+                </div>
+                <div class="card" onclick="toggleModal('ai-modal')">
+                    <i data-lucide="bot"></i>
+                    <h3>AI Ассистент</h3>
+                    <p>Умный помощник</p>
+                </div>
+                <div class="card" onclick="nav('chats')">
+                    <i data-lucide="shield"></i>
+                    <h3>Приватные чаты</h3>
+                    <p>Сквозное шифрование</p>
+                </div>
+                <div class="card" onclick="nav('media')">
+                    <i data-lucide="layers"></i>
+                    <h3>Умные альбомы</h3>
+                    <p>Группировка файлов</p>
+                </div>
+            </div>
+            <div id="home-encryption-status" style="margin-top: 40px; padding: 25px; border-radius: 16px;">
+                <h3 style="display: flex; align-items: center; gap: 10px;"><i data-lucide="shield"></i> Статус безопасности</h3>
+                <div id="home-encryption-info">
+                    <div style="text-align: center; padding: 20px;">Загрузка...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Медиатека -->
+        <section id="v-media" class="hidden">
+            <div class="top-bar">
+                <h2><i data-lucide="image"></i> Медиатека</h2>
+                <div class="controls">
+                    <button class="btn-sec" onclick="loadContent()"><i data-lucide="refresh-cw"></i></button>
+                    <button class="btn-sec" onclick="toggleModal('album-modal')"><i data-lucide="folder-plus"></i> Альбом</button>
+                    <button class="btn-pri" onclick="document.getElementById('file-in').click()"><i data-lucide="upload"></i> Загрузить</button>
+                    <button class="btn-pri" onclick="uploadEncryptedFile()" style="background: linear-gradient(135deg, #8B5CF6, #EC4899);"><i data-lucide="lock"></i> Шифровать</button>
+                    <input type="file" id="file-in" hidden>
+                </div>
+            </div>
+            <h3 class="sec-title"><i data-lucide="folder"></i> Альбомы</h3>
+            <div id="albums-grid" class="grid-row"></div>
+            <h3 class="sec-title"><i data-lucide="image"></i> Файлы</h3>
+            <div id="files-grid" class="grid-cols"></div>
+        </section>
+
+        <!-- Чаты -->
+        <section id="v-chats" class="hidden">
+            <div class="chat-container">
+                <div class="chat-list" id="chat-list">
+                    <div class="cl-head">
+                        <span>Чаты</span>
+                        <button class="btn-xs" onclick="openCreateChatModal()"><i data-lucide="plus"></i></button>
                     </div>
-                    <div class="msg-text">Привет! Я ИИ-ассистент MOC. Спроси меня о шифровании, альбомах, друзьях или других функциях нашего безопасного облака!</div>
+                    <div id="cl-items"></div>
                 </div>
-                <div id="ai-suggestions" class="ai-suggestions">
-                    <button class="ai-suggestion" onclick="insertAiSuggestion('Расскажи про шифрование')">
-                        Шифрование
-                    </button>
-                    <button class="ai-suggestion" onclick="insertAiSuggestion('Как создать альбом?')">
-                        Альбомы
-                    </button>
-                    <button class="ai-suggestion" onclick="insertAiSuggestion('Как добавить друга?')">
-                        Друзья
-                    </button>
-                    <button class="ai-suggestion" onclick="insertAiSuggestion('Что такое умные альбомы?')">
-                        Умные альбомы
-                    </button>
-                    <button class="ai-suggestion" onclick="insertAiSuggestion('Как отправить файл в чат?')">
-                        Отправка файлов
-                    </button>
+                <div class="chat-box">
+                    <div id="chat-empty">
+                        <i data-lucide="message-square"></i>
+                        <p>Выберите чат</p>
+                    </div>
+                    <div id="chat-interface" class="hidden"></div>
                 </div>
             </div>
-            <div class="mini-input">
-                <input type="text" id="ai-input" placeholder="Спроси о MOC... (Enter для отправки)">
-                <button onclick="sendAi()"><i data-lucide="send"></i></button>
+        </section>
+
+        <!-- Профиль -->
+        <section id="v-profile" class="hidden">
+            <div class="profile-header">
+                <div class="p-avatar" id="p-avatar">?</div>
+                <div class="p-info">
+                    <h2 id="p-username">Username</h2>
+                    <p id="p-handle">@handle</p>
+                    <p id="p-bio" class="bio">Loading...</p>
+                    <button class="btn-xs" onclick="openAvatarModal()" style="margin-top: 10px;"><i data-lucide="camera"></i> Сменить аватар</button>
+                </div>
+                <button class="btn-sec" onclick="openEditProfile()"><i data-lucide="edit"></i> Редактировать</button>
+            </div>
+            <div class="stats-row">
+                <div class="stat"><span class="val" id="s-photos">0</span><span class="lbl">ФОТО</span></div>
+                <div class="stat"><span class="val" id="s-albums">0</span><span class="lbl">АЛЬБОМЫ</span></div>
+                <div class="stat"><span class="val" id="s-friends">0</span><span class="lbl">ДРУЗЬЯ</span></div>
+                <div class="stat"><span class="val" id="s-chats">0</span><span class="lbl">ЧАТЫ</span></div>
+            </div>
+            <div class="friends-sec" id="friend-requests-sec" style="display:none;">
+                <div class="fs-head"><h3><i data-lucide="user-plus"></i> Запросы в друзья</h3></div>
+                <div id="friend-requests-list"></div>
+            </div>
+            <div class="friends-sec">
+                <div class="fs-head">
+                    <h3><i data-lucide="users"></i> Друзья</h3>
+                    <button class="btn-xs" onclick="addFriend()"><i data-lucide="user-plus"></i></button>
+                </div>
+                <div id="friends-list"></div>
+            </div>
+            <div class="friends-sec" id="suggested-friends-section" style="display: none;">
+                <div class="fs-head">
+                    <h3><i data-lucide="users"></i> Возможные друзья</h3>
+                </div>
+                <div id="suggested-friends-list"></div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<div id="sidebar-overlay" class="sidebar-overlay" onclick="closeMobileMenu()"></div>
+
+<div id="admin-stats-modal" class="modal hidden">
+    <div class="modal-card" style="max-width: 90vw; max-height: 80vh; overflow-y: auto;">
+        <div class="modal-header-row">
+            <h3><i data-lucide="bar-chart"></i> Статистика пользователей</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('admin-stats-modal')"></i>
+        </div>
+        <div id="admin-stats-content">Загрузка...</div>
+    </div>
+</div>
+<!-- Плавающие кнопки -->
+<div class="floating-dock">
+    <button class="float-btn yellow" onclick="toggleModal('bug-modal')"><i data-lucide="alert-triangle"></i></button>
+    <button class="float-btn green" onclick="toggleModal('ai-modal')"><i data-lucide="bot"></i></button>
+</div>
+
+<!-- Индикатор печатания -->
+<div id="typing-indicator" class="typing-indicator hidden">
+    <i data-lucide="loader"></i> Кто-то печатает...
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        checkSession();
+        initEventListeners();
+        
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+        
+        // Запускаем проверку статуса шифрования
+        setTimeout(() => {
+            checkSecurityStatus();
+        }, 1000);
+    });
+    
+    function toggleMobileMenu() {
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            sidebar.classList.toggle('mobile-open');
+        }
+    }
+    
+    function checkEncryptionStatus() {
+        checkSecurityStatus();
+    }
+</script>
+<!-- Security Dashboard Modal -->
+<div id="security-dashboard-modal" class="modal hidden">
+    <div class="modal-card" style="max-width: 650px;">
+        <div class="modal-header-row">
+            <h3><i data-lucide="shield"></i> Панель безопасности</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('security-dashboard-modal')"></i>
+        </div>
+        <div id="security-dashboard-content">
+            <div style="text-align:center; padding:40px;"><i data-lucide="loader" class="loading-spinner"></i> Загрузка...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // При изменении размера окна сбрасываем мобильное состояние
+    window.addEventListener('resize', () => {
+        if (window.innerWidth > 768) {
+            const chatList = document.querySelector('.chat-list');
+            const chatBox = document.querySelector('.chat-box');
+            if (chatList) chatList.classList.remove('hide-on-mobile');
+            if (chatBox) chatBox.classList.remove('show-on-mobile');
+        }
+    });
+</script>
+<!-- Модалка для просмотра файла -->
+<div id="file-view-modal" class="modal hidden">
+    <div class="modal-card file-view-modal">
+        <div class="modal-header-row">
+            <h3><i data-lucide="file"></i> <span id="file-view-name">Файл</span></h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('file-view-modal')"></i>
+        </div>
+        <div class="file-view-content" id="file-view-content">
+            <div id="file-view-preview"></div>
+            <div class="file-view-info">
+                <div><strong id="file-view-filename"></strong><br><small id="file-view-size"></small></div>
+                <div class="file-view-actions">
+                    <button class="btn-primary" onclick="downloadCurrentFile()"><i data-lucide="download"></i> Скачать</button>
+                    <button class="btn-secondary" onclick="saveFileToCloud()"><i data-lucide="cloud"></i> Сохранить в облако</button>
+                    <button class="btn-secondary" onclick="shareCurrentFile()"><i data-lucide="send"></i> Отправить в чат</button>
+                </div>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- MODAL: BUG REPORT -->
-    <div id="bug-modal" class="modal hidden">
-        <div class="modal-card">
-            <div class="modal-header-row">
-                <h3><i data-lucide="alert-triangle" style="color: #fbbf24"></i> Сообщить об ошибке</h3>
-                <i data-lucide="x" class="close-icon" onclick="toggleModal('bug-modal')"></i>
-            </div>
-            <p style="font-size:13px; color:#ccc; margin-bottom:10px;">Опишите проблему, мы всё исправим.</p>
-            <textarea id="bug-text" rows="4" placeholder="Например: Не грузятся фото..."></textarea>
-            <button class="btn-primary" onclick="sendBug()">Отправить</button>
+<!-- Модалка для выбора чата при отправке -->
+<div id="chat-select-modal" class="modal hidden">
+    <div class="modal-card chat-select-modal">
+        <div class="modal-header-row">
+            <h3><i data-lucide="send"></i> Отправить в чат</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('chat-select-modal')"></i>
+        </div>
+        <div class="share-link-options">
+            <label>Создать ссылку:</label>
+            <select id="share-link-expires">
+                <option value="1">1 час</option>
+                <option value="12">12 часов</option>
+                <option value="24" selected>1 день</option>
+                <option value="168">7 дней</option>
+                <option value="720">30 дней</option>
+                <option value="8760">365 дней</option>
+            </select>
+            <button class="btn-primary" style="margin-top: 12px;" onclick="createShareLink()"><i data-lucide="link"></i> Создать ссылку</button>
+        </div>
+        <div class="chat-select-list" id="chat-select-list">
+            <div style="text-align:center; padding:20px;">Загрузка чатов...</div>
         </div>
     </div>
+</div>
+</button>
+<!-- Модалка для выбора чата -->
+<div id="chat-select-modal" class="modal hidden">
+    <div class="modal-card chat-select-modal">
+        <div class="modal-header-row">
+            <h3><i data-lucide="send"></i> Отправить в чат</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('chat-select-modal')"></i>
+        </div>
+        <div class="chat-select-list" id="chat-select-list">
+            <div style="text-align:center; padding:20px;">Загрузка...</div>
+        </div>
+    </div>
+</div>
 
-    <!-- MODAL: CREATE ALBUM -->
-    <div id="album-modal" class="modal hidden">
-        <div class="modal-card">
-            <div class="modal-header-row">
-                <h3><i data-lucide="folder-plus"></i> Новый альбом</h3>
-                <i data-lucide="x" onclick="toggleModal('album-modal')"></i>
-            </div>
-            <input type="text" id="album-name" placeholder="Название (например: Лето 2024)">
-            <button class="btn-primary" onclick="createAlbum()">
-                <i data-lucide="check"></i> Создать
+<!-- Модалка для создания ссылки -->
+<div id="share-link-modal" class="modal hidden">
+    <div class="modal-card">
+        <div class="modal-header-row">
+            <h3><i data-lucide="link"></i> Создать ссылку</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('share-link-modal')"></i>
+        </div>
+        <div class="share-link-options">
+            <label>Срок действия:</label>
+            <select id="share-link-expires">
+                <option value="1">1 час</option>
+                <option value="12">12 часов</option>
+                <option value="24" selected>1 день</option>
+                <option value="168">7 дней</option>
+                <option value="720">30 дней</option>
+                <option value="8760">365 дней</option>
+            </select>
+            <button class="btn-primary" style="margin-top: 16px;" onclick="createShareLinkFromModal()">
+                <i data-lucide="link"></i> Создать и скопировать
             </button>
         </div>
     </div>
+</div>
 
-    <!-- MODAL: EDIT PROFILE -->
-    <div id="edit-profile-modal" class="modal hidden">
-        <div class="modal-card">
-            <div class="modal-header-row">
-                <h3><i data-lucide="user"></i> Редактировать профиль</h3>
-                <i data-lucide="x" onclick="toggleModal('edit-profile-modal')"></i>
-            </div>
-            <input type="text" id="edit-handle" placeholder="Отображаемое имя (@handle)">
-            <textarea id="edit-bio" rows="3" placeholder="О себе"></textarea>
-            <button class="btn-primary" onclick="saveProfile()">
-                <i data-lucide="save"></i> Сохранить
-            </button>
+<!-- Модалка для подтверждения удаления сообщения -->
+<div id="delete-message-modal" class="modal hidden">
+    <div class="modal-card delete-confirm-modal">
+        <div class="modal-header-row">
+            <h3><i data-lucide="trash-2"></i> Удалить сообщение</h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('delete-message-modal')"></i>
+        </div>
+        <p>Вы уверены? Сообщение будет удалено для всех участников чата.</p>
+        <div class="delete-confirm-buttons">
+            <button class="btn-secondary" onclick="toggleModal('delete-message-modal')">Отмена</button>
+            <button class="btn-danger" onclick="executeDeleteMessage()">Удалить</button>
         </div>
     </div>
+</div>
 
-    <!-- MODAL: IMAGE VIEW -->
-    <div id="image-modal" class="modal hidden">
-        <div class="modal-card image-modal">
-            <div class="modal-header-row">
-                <h3><i data-lucide="image"></i> Просмотр фото</h3>
-                <i data-lucide="x" class="close-icon" onclick="toggleModal('image-modal')"></i>
-            </div>
-            <div id="image-container">
-                <img id="modal-image" src="" alt="" style="width:100%; border-radius:8px;">
-            </div>
-            <div class="image-actions">
-                <button class="btn-secondary" onclick="downloadImage()">
-                    <i data-lucide="download"></i> Скачать
-                </button>
-                <button class="btn-primary" onclick="toggleModal('image-modal')">
-                    <i data-lucide="x"></i> Закрыть
-                </button>
-            </div>
+<!-- Модалка для просмотра файла -->
+<div id="file-view-modal" class="modal hidden">
+    <div class="modal-card file-view-modal">
+        <div class="modal-header-row">
+            <h3><i data-lucide="file"></i> <span id="file-view-name">Файл</span></h3>
+            <i data-lucide="x" class="close-icon" onclick="toggleModal('file-view-modal')"></i>
         </div>
-    </div>
-
-    <!-- MODAL: ALBUM VIEW -->
-    <div id="album-view-modal" class="modal hidden">
-        <!-- Будет заполняться динамически -->
-    </div>
-
-    <!-- MODAL: ADD TO ALBUM -->
-    <div id="add-to-album-modal" class="modal hidden">
-        <div class="modal-card">
-            <div class="modal-header-row">
-                <h3><i data-lucide="folder-plus"></i> Добавить в альбом</h3>
-                <i data-lucide="x" class="close-icon" onclick="toggleModal('add-to-album-modal')"></i>
-            </div>
-            <div id="albums-select">
-                <p>Загрузка альбомов...</p>
-            </div>
-            <div id="album-actions" class="hidden">
-                <button class="btn-primary" onclick="addSelectedToAlbum()">
-                    <i data-lucide="plus"></i> Добавить
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL: SELECT FILES FOR ALBUM -->
-    <div id="select-files-modal" class="modal hidden">
-        <div class="modal-card">
-            <div class="modal-header-row">
-                <h3><i data-lucide="image"></i> Выберите фото для альбома</h3>
-                <i data-lucide="x" class="close-icon" onclick="toggleModal('select-files-modal')"></i>
-            </div>
-            <div id="files-select">
-                <p>Загрузка фото...</p>
-            </div>
-            <div id="files-actions" class="hidden">
-                <button class="btn-primary" onclick="addSelectedFilesToAlbum()">
-                    <i data-lucide="plus"></i> Добавить выбранные
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL: SHARE FILE -->
-    <div id="share-file-modal" class="modal hidden">
-        <div class="modal-card">
-            <div class="modal-header-row">
-                <h3><i data-lucide="share-2"></i> Поделиться файлом</h3>
-                <i data-lucide="x" class="close-icon" onclick="toggleModal('share-file-modal')"></i>
-            </div>
-            <div id="share-file-info">
-                <p>Загрузка информации о файле...</p>
-            </div>
-            <div class="share-options">
-                <div class="share-option">
-                    <h4><i data-lucide="link"></i> Создать ссылку</h4>
-                    <p>Создайте публичную ссылку для скачивания файла</p>
-                    <select id="share-expires">
-                        <option value="1">На 1 час</option>
-                        <option value="24" selected>На 24 часа</option>
-                        <option value="168">На 7 дней</option>
-                        <option value="720">На 30 дней</option>
-                    </select>
-                    <button class="btn-primary" onclick="createShareLink()">
-                        <i data-lucide="link"></i> Создать ссылку
-                    </button>
+        <div class="file-view-content">
+            <div id="file-view-preview"></div>
+            <div class="file-view-info">
+                <div>
+                    <strong id="file-view-filename"></strong><br>
+                    <small id="file-view-size"></small>
                 </div>
-                
-                <div class="share-option">
-                    <h4><i data-lucide="message-square"></i> Отправить в чат</h4>
-                    <p>Отправить файл в один из ваших чатов</p>
-                    <select id="share-chat-select">
-                        <option value="">Выберите чат...</option>
-                    </select>
-                    <button class="btn-primary" onclick="sendFileToChat()">
+                <div class="file-view-actions">
+                    <button class="btn-secondary" onclick="downloadCurrentFile()">
+                        <i data-lucide="download"></i> Скачать
+                    </button>
+                    <button class="btn-secondary" onclick="saveFileToCloudFromModal()">
+                        <i data-lucide="cloud"></i> Сохранить
+                    </button>
+                    <button class="btn-primary" onclick="shareCurrentFileFromModal()">
                         <i data-lucide="send"></i> Отправить
                     </button>
                 </div>
             </div>
-            
-            <div id="share-result" class="hidden">
-                <div class="share-success">
-                    <i data-lucide="check-circle" style="color: #10B981;"></i>
-                    <h4>Ссылка создана!</h4>
-                    <div class="share-link-container">
-                        <input type="text" id="share-link" readonly>
-                        <button class="btn-xs" onclick="copyShareLink()">
-                            <i data-lucide="copy"></i>
-                        </button>
-                    </div>
-                    <p class="share-note">Ссылка будет активна указанное время</p>
-                </div>
-            </div>
         </div>
     </div>
-
-    <!-- MAIN APP -->
-    <div id="app" class="hidden">
-        <aside class="sidebar">
-            <div class="logo">
-                <i data-lucide="cloud"></i> <span>MOC</span>
-            </div>
-            <nav>
-                <a href="#" id="l-home" class="active" onclick="nav('home')">
-                    <i data-lucide="home"></i> Главная
-                </a>
-                <a href="#" id="l-media" onclick="nav('media')">
-                    <i data-lucide="image"></i> Медиа
-                </a>
-                <a href="#" id="l-chats" onclick="nav('chats')">
-                    <i data-lucide="message-square"></i> Чаты
-                </a>
-                <a href="#" id="l-profile" onclick="nav('profile')">
-                    <i data-lucide="user"></i> Профиль
-                </a>
-                <a href="#" id="l-security" onclick="openSecurityDashboard()">
-                    <i data-lucide="shield"></i> Безопасность
-                </a>
-            </nav>
-            <div class="user-mini">
-                <div class="avatar-xs" id="mini-avatar">?</div>
-                <div class="user-info">
-                    <span id="mini-name">User</span>
-                    <span onclick="logout()" class="logout-link">Выйти</span>
-                </div>
-            </div>
-        </aside>
-
-        <main class="content">
-            <!-- VIEW: HOME -->
-            <section id="v-home">
-                <div class="hero">
-                    <h1>MOC <span class="badge">SECURE</span></h1>
-                    <p>Безопасное. Умное. <span class="highlight">Твоё. 🔐</span></p>
-                </div>
-                <div class="cards-grid">
-                    <div class="card clickable" onclick="openSecurityDashboard()">
-                        <i data-lucide="lock"></i>
-                        <h3>Полное шифрование</h3>
-                        <p>XChaCha20-Poly1305 + AES-GCM-SIV</p>
-                        <div class="encryption-badge">Client-first</div>
-                    </div>
-                    <div class="card clickable" onclick="toggleModal('ai-modal')">
-                        <i data-lucide="bot"></i>
-                        <h3>AI Ассистент</h3>
-                        <p>Умный поиск и сортировка.</p>
-                        <div class="encryption-badge">Edge AI</div>
-                    </div>
-                    <div class="card clickable" onclick="nav('chats')">
-                        <i data-lucide="shield"></i>
-                        <h3>Приватные чаты</h3>
-                        <p>E2EE + Proxy Re-Encryption</p>
-                        <div class="encryption-badge">Безопасный шаринг</div>
-                    </div>
-                    <div class="card clickable" onclick="nav('media')">
-                        <i data-lucide="layers"></i>
-                        <h3>Умные альбомы</h3>
-                        <p>AI-генерация + Adaptive Copies</p>
-                        <div class="encryption-badge">ATC</div>
-                    </div>
-                    <div class="card clickable" onclick="setupSocialRecovery()">
-                        <i data-lucide="users"></i>
-                        <h3>Social Recovery</h3>
-                        <p>Восстановление через друзей</p>
-                        <div class="encryption-badge">Shamir SS</div>
-                    </div>
-                    <div class="card clickable" onclick="document.getElementById('file-in').click()">
-                        <i data-lucide="upload"></i>
-                        <h3>Безопасная загрузка</h3>
-                        <p>Шифрование на устройстве</p>
-                        <div class="encryption-badge">Zero-knowledge</div>
-                    </div>
-                </div>
-                
-                <!-- Статус шифрования -->
-                <div id="home-encryption-status" style="margin-top: 40px; padding: 25px; background: white; border-radius: var(--radius); box-shadow: var(--shadow);">
-                    <h3 style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
-                        <i data-lucide="shield"></i> Статус безопасности
-                    </h3>
-                    <div id="home-encryption-info">
-                        <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
-                            <i data-lucide="loader" width="24" height="24" style="animation: spin 1s linear infinite;"></i>
-                            <p style="margin-top: 10px;">Проверка статуса шифрования...</p>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- VIEW: MEDIA -->
-            <section id="v-media" class="hidden">
-                <div class="top-bar">
-                    <h2><i data-lucide="image"></i> Медиатека</h2>
-                    <div class="controls">
-                        <button class="btn-sec" onclick="loadContent()" title="Обновить">
-                            <i data-lucide="refresh-cw"></i> Обновить
-                        </button>
-                        <button class="btn-sec" onclick="toggleModal('album-modal')" title="Создать альбом">
-                            <i data-lucide="folder-plus"></i> Альбом
-                        </button>
-                        <button class="btn-pri" onclick="document.getElementById('file-in').click()" title="Загрузить фото">
-                            <i data-lucide="upload"></i> Загрузить
-                        </button>
-                        <!-- ДОБАВЬТЕ ЭТУ КНОПКУ -->
-                        <button class="btn-pri" onclick="uploadEncryptedFile()" title="Загрузить с шифрованием" style="background: linear-gradient(135deg, #8B5CF6, #EC4899);">
-                            <i data-lucide="lock"></i> Зашифровать файл
-                        </button>
-                        <input type="file" id="file-in" hidden accept="image/*,video/*">
-                    </div>
-                </div>
-                
-                <h3 class="sec-title"><i data-lucide="folder"></i> Альбомы</h3>
-                <div id="albums-grid" class="grid-row">
-                    <!-- Альбомы будут загружены динамически -->
-                </div>
-                
-                <h3 class="sec-title"><i data-lucide="image"></i> Фотографии и файлы</h3>
-                <div id="files-grid" class="grid-cols">
-                    <!-- Файлы будут загружены динамически -->
-                </div>
-            </section>
-
-            <!-- VIEW: CHATS -->
-            <section id="v-chats" class="hidden">
-                <div class="chat-container">
-                    <div class="chat-list">
-                        <div class="cl-head">
-                            <span>Чаты</span>
-                            <button class="btn-xs" onclick="addChat()" title="Новый чат">
-                                <i data-lucide="plus"></i>
-                            </button>
-                        </div>
-                        <div id="cl-items">
-                            <!-- Список чатов будет загружен динамически -->
-                        </div>
-                    </div>
-                    <div class="chat-box">
-                        <div id="chat-empty">
-                            <i data-lucide="message-square" width="48" height="48" style="color:#9CA3AF; margin-bottom:16px;"></i>
-                            <p>Выберите чат для начала общения</p>
-                            <p style="font-size:14px; color:#6B7280; margin-top:10px;">Или создайте новый чат кнопкой "+"</p>
-                        </div>
-                        <div id="chat-interface" class="hidden">
-                            <!-- Структура чата будет создана динамически -->
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- VIEW: PROFILE -->
-            <section id="v-profile" class="hidden">
-                <div class="profile-header">
-                    <div class="p-avatar" id="p-avatar">SK</div>
-                    <div class="p-info">
-                        <h2 id="p-username">Username</h2>
-                        <p id="p-handle">@handle</p>
-                        <p id="p-bio" class="bio">Loading...</p>
-                    </div>
-                    <button class="btn-sec" onclick="openEditProfile()">
-                        <i data-lucide="edit"></i> Редактировать
-                    </button>
-                </div>
-                
-                <div class="stats-row">
-                    <div class="stat">
-                        <span class="val" id="s-photos">0</span>
-                        <span class="lbl">ФОТО</span>
-                    </div>
-                    <div class="stat">
-                        <span class="val" id="s-albums">0</span>
-                        <span class="lbl">АЛЬБОМЫ</span>
-                    </div>
-                    <div class="stat">
-                        <span class="val" id="s-friends">0</span>
-                        <span class="lbl">ДРУЗЬЯ</span>
-                    </div>
-                    <div class="stat">
-                        <span class="val" id="s-chats">0</span>
-                        <span class="lbl">ЧАТЫ</span>
-                    </div>
-                </div>
-
-                <!-- Запросы в друзья -->
-                <div class="friends-sec" id="friend-requests-sec" style="display: none;">
-                    <div class="fs-head">
-                        <h3><i data-lucide="user-plus"></i> Запросы в друзья</h3>
-                    </div>
-                    <div id="friend-requests-list">
-                        <!-- Запросы будут загружены динамически -->
-                    </div>
-                </div>
-
-                <!-- Список друзей -->
-                <div class="friends-sec">
-                    <div class="fs-head">
-                        <h3><i data-lucide="users"></i> Друзья</h3>
-                        <button class="btn-xs" onclick="addFriend()" title="Добавить друга">
-                            <i data-lucide="user-plus"></i>
-                        </button>
-                    </div>
-                    <div id="friends-list">
-                        <!-- Друзья будут загружены динамически -->
-                    </div>
-                </div>
-            </section>
-        </main>
-    </div>
-
-    <!-- FLOATING BUTTONS -->
-    <div class="floating-dock">
-        <button class="float-btn yellow" onclick="toggleModal('bug-modal')" title="Сообщить об ошибке">
-            <i data-lucide="alert-triangle"></i>
-        </button>
-        <button class="float-btn green" onclick="toggleModal('ai-modal')" title="AI Ассистент">
-            <i data-lucide="bot"></i>
-        </button>
-    </div>
-
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
-    
-    <script>
-        // Инициализация
-        document.addEventListener('DOMContentLoaded', () => {
-            // Проверяем, если мы на странице восстановления
-            if (window.location.pathname.startsWith('/recover/')) {
-                document.getElementById('app').classList.add('hidden');
-                document.getElementById('auth-modal').classList.add('hidden');
-                document.getElementById('recovery-page').classList.remove('hidden');
-                
-                const token = window.location.pathname.split('/')[2];
-                if (token) {
-                    document.getElementById('recovery-token-input').value = token;
-                    setTimeout(() => verifyRecoveryToken(), 500);
-                }
-            } else {
-                // Обычная инициализация
-                checkSession();
-                initEventListeners();
-                
-                if (typeof lucide !== 'undefined') {
-                    lucide.createIcons();
-                }
-                
-                // Запускаем проверку статуса шифрования
-                setTimeout(() => {
-                    checkSecurityStatus();
-                }, 1000);
-            }
-        });
-        
-        // Функция для отображения статуса шифрования
-        function checkEncryptionStatus() {
-            const statusElement = document.getElementById('home-encryption-info');
-            if (statusElement) {
-                statusElement.innerHTML = `
-                    <div style="text-align: center; padding: 20px;">
-                        <i data-lucide="loader" width="24" height="24" style="animation: spin 1s linear infinite;"></i>
-                        <p style="margin-top: 10px;">Проверка статуса шифрования...</p>
-                    </div>
-                `;
-                checkSecurityStatus();
-            }
-        }
-    </script>
+</div>
 </body>
-
 </html>
