@@ -135,7 +135,7 @@ def init_db():
     cursor.execute("SELECT id FROM users WHERE username = 'support'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO users (username, password, handle, bio) VALUES (?, ?, ?, ?)",
-                      ('support', generate_password_hash('support123'), 'support', 'Техническая поддержка'))
+                      ('support', generate_password_hash('support123'), 'support', 'Техническая поддержка', 1))
     
     conn.commit()
     conn.close()
