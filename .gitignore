@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.db
+*.sqlite
+moc.db
+.env
+uploads/
+encrypted_data/
+previews/
+.DS_Store
+venv/
+env/
+.venv/
