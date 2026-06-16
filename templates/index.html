@@ -604,5 +604,12 @@
         </div>
     </div>
 </div>
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/sw.js')
+        .then(() => console.log('✅ Service Worker registered'))
+        .catch(err => console.log('❌ SW error:', err));
+}
+</script>
 </body>
 </html>
